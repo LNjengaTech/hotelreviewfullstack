@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react'; // Import useCallback
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts'; // Import Recharts components
 
 const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
     const [overallAnalytics, setOverallAnalytics] = useState(null);
@@ -22,7 +25,6 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
     const API_BASE_URL = 'http://localhost:5000';
 
     // --- Fetch Analytics and Hotels ---
-    // Moved fetchAdminData outside useEffect to be accessible by other handlers
     const fetchAdminData = useCallback(async () => {
         setIsLoadingAnalytics(true);
         setAnalyticsError(null);
@@ -68,7 +70,7 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
 
             // Fetch all hotels for management
             const hotelsRes = await fetch(`${API_BASE_URL}/api/hotels`, {
-                headers: { 'Authorization': `Bearer ${token}` } // Even though /api/hotels is public, sending token is harmless
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             const hotelsData = await hotelsRes.json();
             if (!hotelsRes.ok) throw new Error(hotelsData.message || 'Failed to fetch hotels for management');
@@ -81,24 +83,24 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
         } finally {
             setIsLoadingAnalytics(false);
         }
-    }, [onHotelsUpdated]); // Dependencies for useCallback: re-create if onHotelsUpdated changes
+    }, [onHotelsUpdated]);
 
     useEffect(() => {
-        fetchAdminData(); // Call the memoized function
-    }, [fetchAdminData]); // Depend on fetchAdminData itself
+        fetchAdminData();
+    }, [fetchAdminData]);
 
 
     // --- Hotel Management Handlers ---
 
     const openAddHotelModal = () => {
-        setCurrentHotel(null); // No hotel selected for editing
+        setCurrentHotel(null);
         setHotelForm({ name: '', location: '', description: '', imageUrl: '' });
         setHotelMessage('');
         setIsHotelModalOpen(true);
     };
 
     const openEditHotelModal = (hotel) => {
-        setCurrentHotel(hotel); // Set the hotel to be edited
+        setCurrentHotel(hotel);
         setHotelForm({
             name: hotel.name,
             location: hotel.location,
@@ -162,10 +164,9 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
             }
 
             setHotelMessage(data.message);
-            // Refresh the list of hotels and analytics after successful operation
-            onHotelsUpdated(); // Trigger refresh in App.jsx
-            await fetchAdminData(); // Re-fetch analytics and hotels for this component
-            closeHotelModal(); // Close modal on success
+            onHotelsUpdated();
+            await fetchAdminData();
+            closeHotelModal();
 
         } catch (err) {
             console.error('Hotel operation error:', err);
@@ -202,8 +203,8 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
             }
 
             setHotelMessage(data.message);
-            onHotelsUpdated(); // Trigger refresh in App.jsx
-            await fetchAdminData(); // Re-fetch analytics and hotels for this component
+            onHotelsUpdated();
+            await fetchAdminData();
 
         } catch (err) {
             console.error('Hotel deletion error:', err);
@@ -257,7 +258,7 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
                 <h2 className="text-4xl font-extrabold text-indigo-700 mb-4 text-center">Admin Dashboard</h2>
                 <p className="text-xl text-gray-700 mb-6 text-center">Welcome, <span className="font-semibold">{username}</span>!</p>
 
-                {/* Overall Analytics */}
+                {/* Overall Analytics Section */}
                 {overallAnalytics && (
                     <div className="mb-8 p-6 bg-blue-50 rounded-lg shadow-md">
                         <h3 className="text-2xl font-bold text-blue-800 mb-4">Overall Statistics</h3>
@@ -336,32 +337,53 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
                 </div>
 
 
-                {/* Reviews Per Hotel */}
+                {/* Reviews Per Hotel - CHART & TABLE */}
                 <div className="mb-8 p-6 bg-green-50 rounded-lg shadow-md">
                     <h3 className="text-2xl font-bold text-green-800 mb-4">Reviews per Hotel</h3>
                     {reviewsPerHotel.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full bg-white rounded-lg shadow-sm">
-                                <thead className="bg-green-100">
-                                    <tr>
-                                        <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Hotel Name</th>
-                                        <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Review Count</th>
-                                        <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Avg. Rating</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {reviewsPerHotel.map((data, index) => (
-                                        <tr key={data.hotelId} className={index % 2 === 0 ? 'bg-white' : 'bg-green-50'}>
-                                            <td className="py-3 px-4 text-gray-800">{data.hotelName}</td>
-                                            <td className="py-3 px-4 text-gray-800">{data.reviewCount}</td>
-                                            <td className="py-3 px-4 text-gray-800">{data.averageRating}</td>
+                        <>
+                            <h4 className="text-xl font-semibold text-gray-700 mb-3">Review Counts Chart</h4>
+                            <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <BarChart
+                                        data={reviewsPerHotel}
+                                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="hotelName" angle={-45} textAnchor="end" height={80} interval={0} />
+                                        <YAxis />
+                                        <Tooltip />
+                                        <Legend />
+                                        <Bar dataKey="reviewCount" fill="#8884d8" name="Review Count" />
+                                        <Bar dataKey="averageRating" fill="#82ca9d" name="Average Rating" />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            <h4 className="text-xl font-semibold text-gray-700 mb-3 mt-6">Review Counts Table</h4>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full bg-white rounded-lg shadow-sm">
+                                    <thead className="bg-green-100">
+                                        <tr>
+                                            <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Hotel Name</th>
+                                            <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Review Count</th>
+                                            <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Avg. Rating</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        {reviewsPerHotel.map((data, index) => (
+                                            <tr key={data.hotelId} className={index % 2 === 0 ? 'bg-white' : 'bg-green-50'}>
+                                                <td className="py-3 px-4 text-gray-800">{data.hotelName}</td>
+                                                <td className="py-3 px-4 text-gray-800">{data.reviewCount}</td>
+                                                <td className="py-3 px-4 text-gray-800">{data.averageRating}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </>
                     ) : (
-                        <p className="text-gray-600">No review data available per hotel.</p>
+                        <p className="text-gray-600">No review data available per hotel to display charts.</p>
                     )}
                 </div>
 
