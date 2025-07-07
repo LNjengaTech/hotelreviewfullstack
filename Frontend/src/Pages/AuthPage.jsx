@@ -1,66 +1,73 @@
 import React, { useState } from 'react';
 
-// Authentication Page (Login/Register)
-// Authentication Page (Login/Register)
-const AuthPage = ({ onLoginSuccess, onGoBack }) => {
+// AuthPage component
+const AuthPage = ({ onLoginSuccess, onGoBack, API_BASE_URL }) => {
     const [isLoginMode, setIsLoginMode] = useState(true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [username, setUsername] = useState(''); // Only for register
     const [message, setMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(false); // New loading state
 
-    const handleSubmit = async (e) => { // Made async to handle fetch
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        setMessage(''); // Clear previous messages
+        setMessage('');
+        setIsLoading(true);
 
-        const API_BASE_URL = 'http://localhost:5000/api/auth'; // Backend auth endpoint
-
-        try {
-            let response;
-            let responseData; // Use a new variable for parsed JSON data
-
-            if (isLoginMode) {
-                response = await fetch(`${API_BASE_URL}/login`, {
+        if (isLoginMode) {
+            // --- REAL LOGIN API CALL ---
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password }),
                 });
-                responseData = await response.json(); // Parse JSON response
+
+                const data = await response.json();
 
                 if (response.ok) {
                     setMessage('Login successful!');
-                    // Pass the entire user object and token from backend response
-                    onLoginSuccess({
-                        token: responseData.token,
-                        id: responseData.user.id,
-                        username: responseData.user.username,
-                        email: responseData.user.email,
-                        isAdmin: responseData.user.isAdmin
-                    });
+                    // Pass the full data object { token, user: {...} }
+                    onLoginSuccess(data);
                 } else {
-                    setMessage(`Login failed: ${responseData.message || 'Invalid credentials.'}`);
+                    setMessage(`Login failed: ${data.message || 'Server error'}`);
                 }
-            } else {
-                response = await fetch(`${API_BASE_URL}/register`, {
+            } catch (error) {
+                console.error("Login API call failed:", error);
+                setMessage(`Login failed: Network error or server unreachable.`);
+            } finally {
+                setIsLoading(false);
+            }
+        } else {
+            // --- REAL REGISTER API CALL ---
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, email, password })
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, email, password }),
                 });
-                responseData = await response.json(); // Parse JSON response
+
+                const data = await response.json();
 
                 if (response.ok) {
                     setMessage(`Registration successful for ${username}! Please log in.`);
-                    setIsLoginMode(true); // Switch to login mode after successful registration
-                    setEmail(''); // Clear form fields
+                    setIsLoginMode(true);
+                    setEmail('');
                     setPassword('');
                     setUsername('');
                 } else {
-                    setMessage(`Registration failed: ${responseData.message || 'An error occurred.'}`);
+                    setMessage(`Registration failed: ${data.message || 'Server error'}`);
                 }
+            } catch (error) {
+                console.error("Register API call failed:", error);
+                setMessage(`Registration failed: Network error or server unreachable.`);
+            } finally {
+                setIsLoading(false);
             }
-        } catch (error) {
-            console.error('Auth API call error:', error);
-            setMessage(`Network error: ${error.message}. Please ensure the backend is running.`);
         }
     };
 
@@ -71,7 +78,7 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
                     {isLoginMode ? 'Login' : 'Register'}
                 </h2>
                 {message && (
-                    <div className={`p-3 mb-4 rounded-md text-center ${message.includes('failed') || message.includes('error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                    <div className={`p-3 mb-4 rounded-md text-center ${message.includes('failed') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                         {message}
                     </div>
                 )}
@@ -89,6 +96,7 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
                                 required={!isLoginMode}
+                                disabled={isLoading}
                             />
                         </div>
                     )}
@@ -96,15 +104,16 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
                             Email
                         </label>
-                        <input
-                            type="email"
-                            id="email"
-                            className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-blue-500"
-                            placeholder="your@example.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required
-                        />
+                            <input
+                                type="email"
+                                id="email"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-blue-500"
+                                placeholder="your@example.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                required
+                                disabled={isLoading}
+                            />
                     </div>
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
@@ -118,13 +127,15 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
+                            disabled={isLoading}
                         />
                     </div>
                     <button
                         type="submit"
                         className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors duration-300 transform hover:scale-105"
+                        disabled={isLoading}
                     >
-                        {isLoginMode ? 'Login' : 'Register'}
+                        {isLoading ? 'Loading...' : (isLoginMode ? 'Login' : 'Register')}
                     </button>
                 </form>
                 <div className="mt-6 text-center">
@@ -133,12 +144,13 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
                         <button
                             onClick={() => {
                                 setIsLoginMode(!isLoginMode);
-                                setMessage(''); // Clear messages when switching mode
+                                setMessage('');
                                 setEmail('');
                                 setPassword('');
                                 setUsername('');
                             }}
                             className="text-blue-500 hover:text-blue-700 font-semibold focus:outline-none"
+                            disabled={isLoading}
                         >
                             {isLoginMode ? 'Register here' : 'Login here'}
                         </button>
@@ -146,6 +158,7 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
                     <button
                         onClick={onGoBack}
                         className="mt-4 text-gray-500 hover:text-gray-700 text-sm focus:outline-none"
+                        disabled={isLoading}
                     >
                         &larr; Go back
                     </button>
@@ -154,4 +167,5 @@ const AuthPage = ({ onLoginSuccess, onGoBack }) => {
         </div>
     );
 };
+
 export default AuthPage;

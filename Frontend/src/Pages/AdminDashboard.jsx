@@ -3,7 +3,7 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'; // Import Recharts components
 
-const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
+const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated, API_BASE_URL }) => { // Added API_BASE_URL prop
     const [overallAnalytics, setOverallAnalytics] = useState(null);
     const [reviewsPerHotel, setReviewsPerHotel] = useState([]);
     const [recentReviews, setRecentReviews] = useState([]);
@@ -21,78 +21,126 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
         imageUrl: ''
     });
     const [hotelMessage, setHotelMessage] = useState(''); // Message for hotel add/edit/delete operations
+    const [showConfirmModal, setShowConfirmModal] = useState(false); // State for custom confirm modal
+    const [hotelToDelete, setHotelToDelete] = useState(null); // State to store hotel ID for deletion
 
-    const API_BASE_URL = 'http://localhost:5000';
+    // --- Helper to get the JWT token from localStorage ---
+    const getToken = () => {
+        const storedUser = localStorage.getItem('dummyUser');
+        if (storedUser) {
+            try {
+                const parsedData = JSON.parse(storedUser);
+                console.log("getToken: Parsed data from localStorage:", parsedData); // Log parsed data
+                if (parsedData.token) {
+                    console.log("getToken: Token found and returning.");
+                    return parsedData.token;
+                } else {
+                    console.warn("getToken: 'token' property not found in localStorage data. Stored data:", parsedData);
+                    return null;
+                }
+            } catch (e) {
+                console.error("getToken: Failed to parse token from localStorage:", e);
+                return null;
+            }
+        }
+        console.log("getToken: No 'dummyUser' found in localStorage.");
+        return null;
+    };
 
     // --- Fetch Analytics and Hotels ---
     const fetchAdminData = useCallback(async () => {
+        console.log("fetchAdminData: Starting fetch for admin data...");
         setIsLoadingAnalytics(true);
         setAnalyticsError(null);
 
-        const storedUser = localStorage.getItem('dummyUser');
-        if (!storedUser) {
-            setAnalyticsError('Not authenticated. Please log in as an admin.');
-            setIsLoadingAnalytics(false);
-            return;
-        }
-        const { token } = JSON.parse(storedUser);
+        const token = getToken();
+        console.log("fetchAdminData: Token retrieved:", token ? "Exists (length: " + token.length + ")" : "Does NOT exist"); // Log token presence and length
 
         if (!token) {
-            setAnalyticsError('Authentication token missing. Please log in again.');
+            setAnalyticsError('Authentication required. Please log in as an admin.');
             setIsLoadingAnalytics(false);
+            console.error("fetchAdminData: No token found, stopping fetch.");
             return;
         }
 
         try {
             // Fetch Overall Analytics
+            console.log(`fetchAdminData: Fetching overall analytics from ${API_BASE_URL}/api/analytics/overall`);
             const overallRes = await fetch(`${API_BASE_URL}/api/analytics/overall`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            console.log("fetchAdminData: Overall analytics response status:", overallRes.status);
             const overallData = await overallRes.json();
-            if (!overallRes.ok) throw new Error(overallData.message || 'Failed to fetch overall analytics');
+            if (!overallRes.ok) {
+                console.error("fetchAdminData: Overall analytics fetch failed with data:", overallData);
+                throw new Error(overallData.message || 'Failed to fetch overall analytics');
+            }
             setOverallAnalytics(overallData);
 
             // Fetch Reviews Per Hotel
+            console.log(`fetchAdminData: Fetching reviews per hotel from ${API_BASE_URL}/api/analytics/reviews-per-hotel`);
             const rphRes = await fetch(`${API_BASE_URL}/api/analytics/reviews-per-hotel`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            console.log("fetchAdminData: Reviews per hotel response status:", rphRes.status);
             const rphData = await rphRes.json();
-            if (!rphRes.ok) throw new Error(rphData.message || 'Failed to fetch reviews per hotel');
+            if (!rphRes.ok) {
+                console.error("fetchAdminData: Reviews per hotel fetch failed with data:", rphData);
+                throw new Error(rphData.message || 'Failed to fetch reviews per hotel');
+            }
             setReviewsPerHotel(rphData);
 
             // Fetch Recent Reviews
+            console.log(`fetchAdminData: Fetching recent reviews from ${API_BASE_URL}/api/analytics/recent-reviews`);
             const rrRes = await fetch(`${API_BASE_URL}/api/analytics/recent-reviews`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            console.log("fetchAdminData: Recent reviews response status:", rrRes.status);
             const rrData = await rrRes.json();
-            if (!rrRes.ok) throw new Error(rrData.message || 'Failed to fetch recent reviews');
+            if (!rrRes.ok) {
+                console.error("fetchAdminData: Recent reviews fetch failed with data:", rrData);
+                throw new Error(rrData.message || 'Failed to fetch recent reviews');
+            }
             setRecentReviews(rrData);
 
             // Fetch all hotels for management
+            console.log(`fetchAdminData: Fetching hotels for management from ${API_BASE_URL}/api/hotels`);
             const hotelsRes = await fetch(`${API_BASE_URL}/api/hotels`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            console.log("fetchAdminData: Hotels for management response status:", hotelsRes.status);
             const hotelsData = await hotelsRes.json();
-            if (!hotelsRes.ok) throw new Error(hotelsData.message || 'Failed to fetch hotels for management');
+            if (!hotelsRes.ok) {
+                console.error("fetchAdminData: Hotels for management fetch failed with data:", hotelsData);
+                throw new Error(hotelsData.message || 'Failed to fetch hotels for management');
+            }
             setHotels(hotelsData);
 
 
         } catch (err) {
-            console.error('Error fetching admin data:', err);
-            setAnalyticsError(err.message);
+            console.error('fetchAdminData: Error during fetch:', err);
+            setAnalyticsError(`Failed to load analytics: ${err.message}. Please ensure your backend server is running and you have admin privileges.`);
+            // If fetching fails due to auth, prompt logout
+            if (err.message.includes('Authentication required') || err.message.includes('Invalid or expired token') || err.message.includes('Access denied')) {
+                 alert("Your session has expired or you do not have admin privileges. Please log in again.");
+                 onLogout(); // Force logout
+            }
         } finally {
             setIsLoadingAnalytics(false);
+            console.log("fetchAdminData: Fetch process completed.");
         }
-    }, [onHotelsUpdated]);
+    }, [API_BASE_URL, onLogout]); // Added API_BASE_URL to dependencies, removed onGoBack from here to prevent immediate redirect on error
 
     useEffect(() => {
+        console.log("AdminDashboard useEffect: Calling fetchAdminData.");
         fetchAdminData();
     }, [fetchAdminData]);
 
 
-    // --- Hotel Management Handlers ---
+    // --- Hotel Management Handlers (unchanged, but adding console logs for consistency) ---
 
     const openAddHotelModal = () => {
+        console.log("openAddHotelModal: Opening add hotel modal.");
         setCurrentHotel(null);
         setHotelForm({ name: '', location: '', description: '', imageUrl: '' });
         setHotelMessage('');
@@ -100,6 +148,7 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
     };
 
     const openEditHotelModal = (hotel) => {
+        console.log("openEditHotelModal: Opening edit hotel modal for:", hotel.name);
         setCurrentHotel(hotel);
         setHotelForm({
             name: hotel.name,
@@ -112,6 +161,7 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
     };
 
     const closeHotelModal = () => {
+        console.log("closeHotelModal: Closing hotel modal.");
         setIsHotelModalOpen(false);
         setCurrentHotel(null);
         setHotelForm({ name: '', location: '', description: '', imageUrl: '' });
@@ -121,17 +171,20 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
     const handleHotelFormChange = (e) => {
         const { name, value } = e.target;
         setHotelForm(prev => ({ ...prev, [name]: value }));
+        console.log(`handleHotelFormChange: ${name} changed to ${value}`);
     };
 
     const handleSubmitHotel = async (e) => {
         e.preventDefault();
         setHotelMessage('');
+        console.log("handleSubmitHotel: Submitting hotel form.");
 
-        const storedUser = localStorage.getItem('dummyUser');
-        const { token } = JSON.parse(storedUser);
+        const token = getToken(); // Get token via helper function
+        console.log("handleSubmitHotel: Token retrieved:", token ? "Exists" : "Does NOT exist");
 
         if (!token) {
             setHotelMessage('Authentication token missing. Please log in again.');
+            console.error("handleSubmitHotel: No token found, stopping submission.");
             return;
         }
 
@@ -143,9 +196,11 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
             if (currentHotel) { // Editing existing hotel
                 method = 'PUT';
                 url = `${API_BASE_URL}/api/hotels/${currentHotel._id}`;
+                console.log(`handleSubmitHotel: Editing hotel at ${url}`);
             } else { // Adding new hotel
                 method = 'POST';
                 url = `${API_BASE_URL}/api/hotels`;
+                console.log(`handleSubmitHotel: Adding new hotel at ${url}`);
             }
 
             response = await fetch(url, {
@@ -158,38 +213,51 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
             });
 
             const data = await response.json();
+            console.log("handleSubmitHotel: Response status:", response.status, "Data:", data);
 
             if (!response.ok) {
                 throw new Error(data.message || 'Failed to perform operation');
             }
 
             setHotelMessage(data.message);
-            onHotelsUpdated();
-            await fetchAdminData();
+            onHotelsUpdated(); // Notify App.jsx to refresh hotel list
+            await fetchAdminData(); // Re-fetch all admin data including updated hotel list
             closeHotelModal();
+            console.log("handleSubmitHotel: Hotel operation successful.");
 
         } catch (err) {
-            console.error('Hotel operation error:', err);
+            console.error('handleSubmitHotel: Hotel operation error:', err);
             setHotelMessage(`Error: ${err.message}`);
+            if (err.message.includes('Authentication required') || err.message.includes('Invalid or expired token') || err.message.includes('Access denied')) {
+                 alert("Your session has expired or you do not have admin privileges. Please log in again.");
+                 onLogout(); // Force logout
+            }
         }
     };
 
-    const handleDeleteHotel = async (hotelId) => {
-        if (!window.confirm('Are you sure you want to delete this hotel and all its reviews?')) {
-            return;
-        }
+    // Function to open the custom confirmation modal
+    const confirmDeleteHotel = (hotelId) => {
+        console.log("confirmDeleteHotel: Confirming deletion for hotel ID:", hotelId);
+        setHotelToDelete(hotelId);
+        setShowConfirmModal(true);
+    };
 
+    // Function to handle the actual deletion after confirmation
+    const handleDeleteHotel = async () => {
+        setShowConfirmModal(false); // Close the modal
         setHotelMessage('');
-        const storedUser = localStorage.getItem('dummyUser');
-        const { token } = JSON.parse(storedUser);
+        console.log("handleDeleteHotel: Deleting hotel with ID:", hotelToDelete);
+        const token = getToken(); // Get token via helper function
+        console.log("handleDeleteHotel: Token retrieved:", token ? "Exists" : "Does NOT exist");
 
         if (!token) {
             setHotelMessage('Authentication token missing. Please log in again.');
+            console.error("handleDeleteHotel: No token found, stopping deletion.");
             return;
         }
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/hotels/${hotelId}`, {
+            const response = await fetch(`${API_BASE_URL}/api/hotels/${hotelToDelete}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -197,18 +265,25 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
             });
 
             const data = await response.json();
+            console.log("handleDeleteHotel: Response status:", response.status, "Data:", data);
 
             if (!response.ok) {
                 throw new Error(data.message || 'Failed to delete hotel');
             }
 
             setHotelMessage(data.message);
-            onHotelsUpdated();
-            await fetchAdminData();
+            onHotelsUpdated(); // Notify App.jsx to refresh hotel list
+            await fetchAdminData(); // Re-fetch all admin data
 
         } catch (err) {
-            console.error('Hotel deletion error:', err);
+            console.error('handleDeleteHotel: Hotel deletion error:', err);
             setHotelMessage(`Error: ${err.message}`);
+            if (err.message.includes('Authentication required') || err.message.includes('Invalid or expired token') || err.message.includes('Access denied')) {
+                 alert("Your session has expired or you do not have admin privileges. Please log in again.");
+                 onLogout(); // Force logout
+            }
+        } finally {
+            setHotelToDelete(null); // Clear the hotel to delete state
         }
     };
 
@@ -276,8 +351,8 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
                                 <p className="text-gray-600">Total Reviews</p>
                             </div>
                             <div className="p-4 bg-blue-100 rounded-lg shadow-sm">
-                                <p className="text-3xl font-bold text-blue-700">{overallAnalytics.averageRating}</p>
-                                <p className="text-gray-600">Average Rating</p>
+                                <h3 className="text-lg font-semibold text-gray-700 mb-2">Average Rating</h3>
+                                <p className="text-4xl font-bold text-blue-600">{overallAnalytics.averageRating}</p>
                             </div>
                         </div>
                     </div>
@@ -320,7 +395,7 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
                                                     Edit
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDeleteHotel(hotel._id)}
+                                                    onClick={() => confirmDeleteHotel(hotel._id)} // Use custom confirm
                                                     className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-1 px-3 rounded-full transition-colors duration-200"
                                                 >
                                                     Delete
@@ -398,7 +473,7 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
                                         "{review.comment}"
                                     </p>
                                     <p className="text-sm text-gray-600 mt-1">
-                                        - {review.userName} (Rating: {review.rating}/5) for {review.hotel.name} on {new Date(review.createdAt).toLocaleDateString()}
+                                        - {review.userName} (Rating: {review.rating}/5) for {review.hotel?.name} on {new Date(review.createdAt).toLocaleDateString()}
                                     </p>
                                 </div>
                             ))}
@@ -508,6 +583,30 @@ const AdminDashboard = ({ username, onLogout, onGoBack, onHotelsUpdated }) => {
                                 {currentHotel ? 'Update Hotel' : 'Add Hotel'}
                             </button>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Custom Confirmation Modal for Deletion */}
+            {showConfirmModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white p-8 rounded-lg shadow-2xl w-full max-w-sm text-center relative">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Confirm Deletion</h3>
+                        <p className="text-gray-700 mb-6">Are you sure you want to delete this hotel and all its reviews? This action cannot be undone.</p>
+                        <div className="flex justify-center space-x-4">
+                            <button
+                                onClick={handleDeleteHotel}
+                                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                            >
+                                Yes, Delete
+                            </button>
+                            <button
+                                onClick={() => setShowConfirmModal(false)}
+                                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                            >
+                                Cancel
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

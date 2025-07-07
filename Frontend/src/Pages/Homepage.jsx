@@ -1,13 +1,9 @@
-import React, { useState } from 'react';
-import HotelCard from '../Components/HotelCard.jsx';
-import Hero from '../Components/Hero.jsx';
+import React from 'react';
+import HotelCard from '../Components/HotelCard.jsx'; // Ensure this path is correct for your setup
 
+// HomePage now accepts navigation functions and loading/error states as props
+// It no longer manages its own search term, relying on the 'hotels' prop (which is 'displayedHotels' from App.jsx)
 const HomePage = ({ hotels, onReviewClick, onViewReviewsClick, isLoading, error }) => {
-    const [searchTerm, setSearchTerm] = useState('');
-
-    const filteredHotels = hotels.filter(hotel =>
-        hotel.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
 
     if (isLoading) {
         return (
@@ -22,7 +18,7 @@ const HomePage = ({ hotels, onReviewClick, onViewReviewsClick, isLoading, error 
         return (
             <main className="container mx-auto px-4 py-8 text-center">
                 <p className="text-xl text-red-600">Error loading data: {error}</p>
-                <p className="text-gray-600">Please ensure your backend server is running at http://localhost:5000.</p>
+                <p className="text-gray-600">Please ensure your backend server is running and accessible.</p>
             </main>
         );
     }
@@ -32,23 +28,17 @@ const HomePage = ({ hotels, onReviewClick, onViewReviewsClick, isLoading, error 
             <h1 className="text-4xl font-extrabold text-gray-900 mb-8 text-center">
                 Hotels & Restaurants in Mombasa
             </h1>
-            <div className="mb-8 flex justify-center">
-                <input
-                    type="text"
-                    placeholder="Search hotels by name..."
-                    className="w-full max-w-md p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all duration-300"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-            </div>
+            {/* The search input is now handled by the Navbar component. */}
+            {/* This section previously contained the local search input, now removed. */}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                {filteredHotels.length > 0 ? (
-                    filteredHotels.map((hotel) => (
+                {hotels.length > 0 ? (
+                    hotels.map((hotel) => ( // Use 'hotels' directly, as it's already filtered by App.jsx
                         <HotelCard
                             key={hotel._id} // Use _id from MongoDB
                             hotel={hotel}
-                            onReviewClick={onReviewClick}
-                            onViewReviewsClick={onViewReviewsClick}
+                            onReviewClick={onReviewClick} // Pass down the navigation prop
+                            onViewReviewsClick={onViewReviewsClick} // Pass down the navigation prop
                         />
                     ))
                 ) : (

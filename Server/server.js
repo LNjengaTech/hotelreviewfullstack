@@ -7,7 +7,6 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import bcrypt from 'bcryptjs'; // For password hashing
 import jwt from 'jsonwebtoken'; // For JSON Web Tokens
-import twilio from 'twilio'; // Uncommented: Import Twilio module
 
 // Load environment variables from .env file
 dotenv.config();
@@ -17,7 +16,12 @@ const app = express();
 
 // Middleware
 app.use(express.json()); // For parsing application/json
-app.use(cors()); // Enable CORS for all origins, or configure specific origins if needed
+// IMPORTANT: Configure CORS to specifically allow your Vercel frontend URL
+app.use(cors({
+    origin: 'https://hotel-review-self.vercel.app', // Your Vercel frontend URL
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // --- Database Connection ---
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ratingapp';
@@ -80,16 +84,16 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Review Schema
+// NEW: Review Schema
 const reviewSchema = new mongoose.Schema({
-    hotel: { // Reference to the Hotel model
+    hotel: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Hotel',
+        ref: 'Hotel', // References the Hotel model
         required: true
     },
-    user: { // Reference to the User model
+    user: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        ref: 'User', // References the User model
         required: true
     },
     userName: { // Store username directly for easier display
@@ -104,54 +108,18 @@ const reviewSchema = new mongoose.Schema({
     },
     comment: {
         type: String,
-        trim: true,
-        maxlength: 500 // Optional: limit comment length
+        trim: true
     }
 }, { timestamps: true });
+
+// Add a unique compound index to prevent multiple reviews by the same user for the same hotel
+reviewSchema.index({ hotel: 1, user: 1 }, { unique: true });
 
 const Review = mongoose.model('Review', reviewSchema);
 
 
 // --- JWT Secret ---
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey'; // Use a strong, random key in production!
-
-// --- Twilio Configuration (for WhatsApp) ---
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER; // Your Twilio WhatsApp-enabled number (e.g., 'whatsapp:+14155238886')
-const ADMIN_WHATSAPP_NUMBER = process.env.ADMIN_WHATSAPP_NUMBER; // Admin's WhatsApp number (e.g., 'whatsapp:+2547XXXXXXXX')
-
-// Initialize Twilio client
-const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-
-// Function to send WhatsApp notification (REAL IMPLEMENTATION)
-const sendWhatsAppNotification = async (messageBody) => {
-    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER || !ADMIN_WHATSAPP_NUMBER) {
-        console.error('Twilio credentials or admin WhatsApp number are not fully configured in .env. Skipping real WhatsApp notification.');
-        console.log('\n--- FALLBACK TO SIMULATED WHATSAPP NOTIFICATION ---');
-        console.log(`To: ${ADMIN_WHATSAPP_NUMBER || 'Admin WhatsApp Number'}`);
-        console.log(`Message: ${messageBody}`);
-        console.log('---------------------------------------------------\n');
-        return;
-    }
-
-    try {
-        await twilioClient.messages.create({
-            from: TWILIO_PHONE_NUMBER, // Your Twilio WhatsApp number
-            to: ADMIN_WHATSAPP_NUMBER, // Admin's WhatsApp number
-            body: messageBody
-        });
-        console.log('WhatsApp notification sent successfully!');
-    } catch (error) {
-        console.error('Failed to send WhatsApp notification via Twilio:', error);
-        // Fallback to console log if real sending fails
-        console.log('\n--- WHATSAPP NOTIFICATION FAILED (SEE ERROR ABOVE), FALLING BACK TO CONSOLE LOG ---');
-        console.log(`To: ${ADMIN_WHATSAPP_NUMBER}`);
-        console.log(`Message: ${messageBody}`);
-        console.log('----------------------------------------------------------------------------------\n');
-    }
-};
-
 
 // --- Middleware for Authentication (JWT Verification) ---
 const authenticateToken = (req, res, next) => {
@@ -162,21 +130,27 @@ const authenticateToken = (req, res, next) => {
         return res.status(401).json({ message: 'Authentication token required' });
     }
 
-    jwt.verify(token, JWT_SECRET, (err, user) => {
+    jwt.verify(token, JWT_SECRET, (err, decodedToken) => { // Renamed 'user' to 'decodedToken' for clarity
         if (err) {
             console.error('JWT verification error:', err);
             return res.status(403).json({ message: 'Invalid or expired token' });
         }
-        req.user = user; // Attach user payload to request (contains id, username, email, isAdmin)
+        // CRITICAL FIX: Assign the nested user object from the decoded token to req.user
+        req.user = decodedToken.user;
+        console.log("authenticateToken: JWT verified. User payload from token (after fix):", req.user); // Log the corrected user object
         next();
     });
 };
 
-// Middleware for Admin Authorization
+// --- Middleware for Admin Authorization ---
 const authorizeAdmin = (req, res, next) => {
-    if (!req.user || !req.user.user.isAdmin) {
+    // Check if req.user exists and if req.user.isAdmin is true
+    console.log("authorizeAdmin: Checking user privileges. req.user:", req.user);
+    if (!req.user || !req.user.isAdmin) {
+        console.warn("authorizeAdmin: Access denied for user:", req.user ? req.user.email : "No user", "isAdmin:", req.user ? req.user.isAdmin : "N/A");
         return res.status(403).json({ message: 'Access denied: Admin privileges required' });
     }
+    console.log("authorizeAdmin: Access granted for user:", req.user.email);
     next();
 };
 
@@ -187,7 +161,40 @@ app.get('/', (req, res) => {
     res.send('Rating App Backend is running!');
 });
 
-// Route to get all hotels
+// TEMPORARY: Route to create an admin user for testing (Keep this for now)
+app.post('/api/seed-admin', async (req, res) => {
+    try {
+        const adminEmail = 'admin@example.com';
+        let adminUser = await User.findOne({ email: adminEmail });
+
+        if (adminUser) {
+            // Update existing user to ensure isAdmin is true, in case it was false
+            if (!adminUser.isAdmin) {
+                adminUser.isAdmin = true;
+                await adminUser.save();
+                return res.status(200).json({ message: 'Admin user already exists, isAdmin updated to true.' });
+            }
+            return res.status(200).json({ message: 'Admin user already exists.' });
+        }
+
+        const hashedPassword = await bcrypt.hash('adminpassword', 10); // Use a strong password!
+        adminUser = new User({
+            username: 'admin',
+            email: adminEmail,
+            password: hashedPassword,
+            isAdmin: true // This is the crucial part
+        });
+
+        await adminUser.save();
+        res.status(201).json({ message: 'Admin user created successfully!', user: adminUser });
+    } catch (error) {
+        console.error('Error seeding admin user:', error);
+        res.status(500).json({ message: 'Failed to seed admin user', error: error.message });
+    }
+});
+
+
+// Route to get all hotels (publicly accessible)
 app.get('/api/hotels', async (req, res) => {
     try {
         const hotels = await Hotel.find({});
@@ -198,98 +205,61 @@ app.get('/api/hotels', async (req, res) => {
     }
 });
 
-// Route to get a single hotel by ID
-app.get('/api/hotels/:id', async (req, res) => {
-    try {
-        const hotel = await Hotel.findById(req.params.id);
-        if (!hotel) {
-            return res.status(404).json({ message: 'Hotel not found' });
-        }
-        res.status(200).json(hotel);
-    } catch (error) {
-        console.error('Error fetching single hotel:', error);
-        res.status(500).json({ message: 'Failed to fetch hotel', error: error.message });
-    }
-});
-
-// --- Hotel Management Routes (Admin Only) ---
-
-// Add a new hotel (Admin Only)
+// Route to add a new hotel (Admin protected)
 app.post('/api/hotels', authenticateToken, authorizeAdmin, async (req, res) => {
     const { name, location, description, imageUrl } = req.body;
-
     if (!name || !location) {
         return res.status(400).json({ message: 'Hotel name and location are required.' });
     }
-
     try {
-        const newHotel = new Hotel({
-            name,
-            location,
-            description,
-            imageUrl
-        });
+        const newHotel = new Hotel({ name, location, description, imageUrl });
         await newHotel.save();
         res.status(201).json({ message: 'Hotel added successfully!', hotel: newHotel });
     } catch (error) {
-        if (error.code === 11000) { // Duplicate key error (for unique name)
-            return res.status(400).json({ message: 'A hotel with this name already exists.' });
-        }
         console.error('Error adding hotel:', error);
+        if (error.code === 11000) { // Duplicate key error
+            return res.status(409).json({ message: 'A hotel with this name already exists.' });
+        }
         res.status(500).json({ message: 'Failed to add hotel', error: error.message });
     }
 });
 
-// Update an existing hotel (Admin Only)
+// Route to update a hotel (Admin protected)
 app.put('/api/hotels/:id', authenticateToken, authorizeAdmin, async (req, res) => {
     const { id } = req.params;
     const { name, location, description, imageUrl } = req.body;
-
-    if (!name || !location) {
-        return res.status(400).json({ message: 'Hotel name and location are required.' });
-    }
-
     try {
         const updatedHotel = await Hotel.findByIdAndUpdate(
             id,
             { name, location, description, imageUrl },
-            { new: true, runValidators: true } // Return the updated document and run schema validators
+            { new: true, runValidators: true }
         );
-
         if (!updatedHotel) {
             return res.status(404).json({ message: 'Hotel not found.' });
         }
         res.status(200).json({ message: 'Hotel updated successfully!', hotel: updatedHotel });
     } catch (error) {
-        if (error.code === 11000) { // Duplicate key error (for unique name)
-            return res.status(400).json({ message: 'A hotel with this name already exists.' });
-        }
         console.error('Error updating hotel:', error);
         res.status(500).json({ message: 'Failed to update hotel', error: error.message });
     }
 });
 
-// Delete a hotel (Admin Only)
+// Route to delete a hotel (Admin protected)
 app.delete('/api/hotels/:id', authenticateToken, authorizeAdmin, async (req, res) => {
     const { id } = req.params;
-
     try {
-        // Optional: Delete all reviews associated with this hotel first
-        await Review.deleteMany({ hotel: id });
-        console.log(`Deleted reviews for hotel ID: ${id}`);
-
         const deletedHotel = await Hotel.findByIdAndDelete(id);
-
         if (!deletedHotel) {
             return res.status(404).json({ message: 'Hotel not found.' });
         }
-        res.status(200).json({ message: 'Hotel and associated reviews deleted successfully!' });
+        // Also delete all reviews associated with this hotel
+        await Review.deleteMany({ hotel: id });
+        res.status(200).json({ message: 'Hotel deleted successfully!' });
     } catch (error) {
         console.error('Error deleting hotel:', error);
         res.status(500).json({ message: 'Failed to delete hotel', error: error.message });
     }
 });
-
 
 // --- Authentication Routes ---
 
@@ -352,24 +322,29 @@ app.post('/api/auth/login', async (req, res) => {
 
         // Generate JWT
         const payload = {
-            user: {
-                id: user.id, // Mongoose virtual 'id' for _id
+            user: { // Ensure this 'user' object is consistently present and includes isAdmin
+                id: user.id,
                 username: user.username,
                 email: user.email,
                 isAdmin: user.isAdmin
             }
         };
 
+        console.log("Login Route: JWT Payload being signed:", payload);
+
         jwt.sign(
             payload,
             JWT_SECRET,
             { expiresIn: '1h' }, // Token expires in 1 hour
             (err, token) => {
-                if (err) throw err;
+                if (err) {
+                    console.error("JWT Sign Error:", err);
+                    return res.status(500).json({ message: 'Error signing token' });
+                }
                 res.json({
                     message: 'Logged in successfully!',
-                    token,
-                    user: {
+                    token, // The actual JWT token string
+                    user: { // The user object to be sent to the frontend response body
                         id: user.id,
                         username: user.username,
                         email: user.email,
@@ -385,170 +360,150 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// Example of a protected route (can be accessed only by authenticated users)
-app.get('/api/auth/protected', authenticateToken, (req, res) => {
-    res.json({
-        message: `Welcome, ${req.user.username}! You accessed a protected route.`,
-        user: req.user
-    });
-});
-
 // --- Review Routes ---
 
-// Submit a new review (PROTECTED ROUTE)
+// Submit a new review (User protected)
 app.post('/api/reviews', authenticateToken, async (req, res) => {
-    const { hotelId, rating, comment } = req.body;
-    const userId = req.user.user.id; // User ID from JWT payload
-    const userName = req.user.user.username; // Username from JWT payload
+    console.log("Backend /api/reviews: Received request."); // Debug log
+    console.log("Backend /api/reviews: req.body:", req.body); // Debug log
+    console.log("Backend /api/reviews: req.user (from token):", req.user); // Debug log
 
-    if (!hotelId || !rating || !comment) {
-        return res.status(400).json({ message: 'Please provide hotel ID, rating, and comment' });
-    }
+    const { hotel: hotelId, rating, comment } = req.body;
+    const userId = req.user?.id; // Use optional chaining in case req.user is null/undefined
+    const userName = req.user?.username; // Use optional chaining
 
-    if (rating < 1 || rating > 5) {
-        return res.status(400).json({ message: 'Rating must be between 1 and 5' });
+    if (!hotelId || !rating || !userId || !userName) {
+        console.error("Backend /api/reviews: Missing required fields. hotelId:", hotelId, "rating:", rating, "userId:", userId, "userName:", userName); // Debug log
+        return res.status(400).json({ message: 'Hotel ID, rating, user ID, and username are required for a review.' });
     }
 
     try {
-        // Check if the hotel exists
-        const hotelExists = await Hotel.findById(hotelId);
-        if (!hotelExists) {
-            return res.status(404).json({ message: 'Hotel not found' });
-        }
-
-        // Check if the user has already reviewed this hotel (optional, but good practice)
+        // Check if the user has already reviewed this hotel
         const existingReview = await Review.findOne({ hotel: hotelId, user: userId });
         if (existingReview) {
-            return res.status(400).json({ message: 'You have already reviewed this hotel.' });
+            console.warn("Backend /api/reviews: User already reviewed this hotel."); // Debug log
+            return res.status(409).json({ message: 'You have already submitted a review for this hotel.' });
         }
 
         const newReview = new Review({
             hotel: hotelId,
             user: userId,
-            userName, // Store username directly
+            userName: userName, // Store username directly
             rating,
             comment
         });
 
         await newReview.save();
-
-        // --- WhatsApp Notification Trigger ---
-        const notificationMessage =
-            `New Review Submitted!\n` +
-            `Hotel: ${hotelExists.name}\n` +
-            `Reviewed by: ${userName}\n` +
-            `Rating: ${rating} stars\n` +
-            `Comment: "${comment}"`;
-
-        sendWhatsAppNotification(notificationMessage); // Call the actual Twilio function
-
+        console.log("Backend /api/reviews: Review saved successfully:", newReview); // Debug log
         res.status(201).json({ message: 'Review submitted successfully!', review: newReview });
-
     } catch (error) {
-        console.error('Error submitting review:', error);
-        res.status(500).json({ message: 'Server error during review submission', error: error.message });
+        console.error('Backend /api/reviews: Error submitting review:', error); // Debug log
+        res.status(500).json({ message: 'Failed to submit review', error: error.message });
     }
 });
 
-// Get all reviews for a specific hotel
-app.get('/api/reviews/:hotelId', async (req, res) => {
+// Get reviews for a specific hotel (Publicly accessible)
+app.get('/api/reviews/hotel/:hotelId', async (req, res) => {
+    const { hotelId } = req.params;
     try {
-        const reviews = await Review.find({ hotel: req.params.hotelId }).sort({ createdAt: -1 }); // Sort by newest first
+        const reviews = await Review.find({ hotel: hotelId })
+            .populate('user', 'username') // Populate user details if needed, though userName is stored directly
+            .sort({ createdAt: -1 }); // Latest reviews first
         res.status(200).json(reviews);
     } catch (error) {
-        console.error('Error fetching reviews:', error);
-        res.status(500).json({ message: 'Server error fetching reviews', error: error.message });
+        console.error('Error fetching reviews for hotel:', error);
+        res.status(500).json({ message: 'Failed to fetch reviews', error: error.message });
     }
 });
 
-// --- Analytics Routes (PROTECTED BY ADMIN AUTHORIZATION) ---
 
-// Get overall analytics data
+// --- Analytics Routes (Admin Protected) ---
+
+// Overall Analytics
 app.get('/api/analytics/overall', authenticateToken, authorizeAdmin, async (req, res) => {
     try {
         const totalHotels = await Hotel.countDocuments();
         const totalUsers = await User.countDocuments();
-        const totalReviews = await Review.countDocuments();
-
-        // Calculate average rating
+        const totalReviews = await Review.countDocuments(); // Fetch actual count
         const avgRatingResult = await Review.aggregate([
-            {
-                $group: {
-                    _id: null,
-                    averageRating: { $avg: "$rating" }
-                }
-            }
+            { $group: { _id: null, averageRating: { $avg: '$rating' } } }
         ]);
-        const averageRating = avgRatingResult.length > 0 ? parseFloat(avgRatingResult[0].averageRating.toFixed(2)) : 0;
+        const averageRating = avgRatingResult.length > 0 ? avgRatingResult[0].averageRating.toFixed(2) : 0;
 
-        res.status(200).json({
-            totalHotels,
-            totalUsers,
-            totalReviews,
-            averageRating
-        });
+        res.json({ totalHotels, totalUsers, totalReviews, averageRating });
     } catch (error) {
         console.error('Error fetching overall analytics:', error);
         res.status(500).json({ message: 'Failed to fetch overall analytics', error: error.message });
     }
 });
 
-// Get review counts per hotel
+// Reviews per Hotel
 app.get('/api/analytics/reviews-per-hotel', authenticateToken, authorizeAdmin, async (req, res) => {
     try {
         const reviewsPerHotel = await Review.aggregate([
             {
                 $group: {
-                    _id: "$hotel", // Group by hotel ID
-                    count: { $sum: 1 },
-                    averageRating: { $avg: "$rating" }
+                    _id: '$hotel', // Group by hotel ID
+                    reviewCount: { $sum: 1 },
+                    averageRating: { $avg: '$rating' }
                 }
             },
             {
-                $lookup: { // Join with Hotel collection to get hotel name
-                    from: "hotels", // The name of the collection in MongoDB (usually lowercase plural of model name)
-                    localField: "_id",
-                    foreignField: "_id",
-                    as: "hotelDetails"
+                $lookup: {
+                    from: 'hotels', // The collection name for Hotel model (lowercase, plural)
+                    localField: '_id',
+                    foreignField: '_id',
+                    as: 'hotelDetails'
                 }
             },
             {
-                $unwind: "$hotelDetails" // Deconstructs the array produced by $lookup
+                $unwind: { path: '$hotelDetails', preserveNullAndEmptyArrays: true } // Use unwind with preserveNullAndEmptyArrays
             },
             {
-                $project: { // Project only necessary fields
+                $project: {
                     _id: 0,
-                    hotelId: "$_id",
-                    hotelName: "$hotelDetails.name",
-                    reviewCount: "$count",
-                    averageRating: { $round: ["$averageRating", 2] } // Round to 2 decimal places
+                    hotelId: '$_id',
+                    hotelName: '$hotelDetails.name', // Access name from populated hotelDetails
+                    reviewCount: 1,
+                    averageRating: { $round: ['$averageRating', 2] }
                 }
             },
             {
                 $sort: { reviewCount: -1 } // Sort by review count descending
             }
         ]);
-
-        res.status(200).json(reviewsPerHotel);
+        res.json(reviewsPerHotel);
     } catch (error) {
         console.error('Error fetching reviews per hotel analytics:', error);
         res.status(500).json({ message: 'Failed to fetch reviews per hotel analytics', error: error.message });
     }
 });
 
-// Get recent reviews (e.g., last 10)
+// Recent Reviews
 app.get('/api/analytics/recent-reviews', authenticateToken, authorizeAdmin, async (req, res) => {
     try {
-        const recentReviews = await Review.find({})
-            .sort({ createdAt: -1 }) // Sort by newest first
-            .limit(10) // Limit to last 10 reviews
-            .populate('hotel', 'name') // Populate hotel name
-            .select('userName rating comment createdAt hotel'); // Select specific fields
+        const recentReviews = await Review.find()
+            .sort({ createdAt: -1 })
+            .limit(5) // Limit to 5 most recent reviews
+            .populate('user', 'username') // Populate user details
+            .populate('hotel', 'name'); // Populate hotel details
 
-        res.status(200).json(recentReviews);
+        // Map to include userName directly from the review document, and hotel name from populated data
+        const formattedReviews = recentReviews.map(review => ({
+            _id: review._id,
+            comment: review.comment,
+            rating: review.rating,
+            userName: review.userName, // Use userName directly from review document
+            hotel: {
+                name: review.hotel ? review.hotel.name : 'Unknown Hotel' // Handle case where hotel might not be found
+            },
+            createdAt: review.createdAt
+        }));
+
+        res.json(formattedReviews);
     } catch (error) {
-        console.error('Error fetching recent reviews:', error);
-        res.status(500).json({ message: 'Failed to fetch recent reviews', error: error.message });
+        console.error('Error fetching recent reviews analytics:', error);
+        res.status(500).json({ message: 'Failed to fetch recent reviews analytics', error: error.message });
     }
 });
 
